@@ -125,7 +125,7 @@ class Model_text_lstm(nn.Module):
         mask = (Y > tag_pad_token).float()
 
         # count how many actual words is there
-        nb_tokens = int(torch.sum(mask).data[0])
+        nb_tokens = int(torch.sum(mask).item())
 
         # pick the values for the label and zero out the rest with the mask
         Y_hat = Y_hat[range(Y_hat.shape[0]), Y] * mask
@@ -178,7 +178,7 @@ class Model_text_lstm(nn.Module):
         train_running_loss = 0.0
         train_acc = 0.0
         # zero the parameter gradients
-        optimizer.zero_grad()   # where shall I make it? maybe for every batch?
+
         for i in range(num_iterations):
             minibatch = sample_coco_minibatch(data, batch_size=batch_size, split='train')
             captions, features, urls = minibatch
@@ -196,12 +196,14 @@ class Model_text_lstm(nn.Module):
             epoch_end = (i + 1) % iterations_per_epoch == 0
             if epoch_end:
                 self.epoch +=1
+                optimizer.zero_grad()  # where shall I make it? maybe for every batch?pico 
                 train_running_loss = 0.0 # update training loss per epochs
-            if (self.epoch) % 5 == 0:
-                print('Epoch:  %d | Current Loss: %.4f' % (self.epoch, loss_history[-1]))
-                if self.epoch % 10 == 0:
-                    evaluate_model(self, data, data['idx_to_word'], batch_size=10) # evaluate the BLEU score from time to in a small batch time...
+                if (self.epoch) % 5 == 0:
+                    print('Epoch:  %d | Current Loss: %.4f' % (self.epoch, loss_history[-1]))
+                    if self.epoch % 10 == 0:
+                        evaluate_model(self, data, data['idx_to_word'], batch_size=10) # evaluate the BLEU score from time to in a small batch time...
 
+        torch.save(self, 'models/current_model.pytorch') # maybe to save the model giving the best BLEU score?
         return loss_history
 
 

@@ -26,15 +26,16 @@ for k, v in data.items():
 # load a small samle of data and let's go!
 small_data = load_coco_data(max_train=1500)
 word2idx = data['word_to_idx']
-num_epochs = 30
+num_epochs = 10
 batch_size = 50
 
 model = Model_text_lstm(embed_size=50, hidden_size=256, img_feat_size=512, word_2_idx=word2idx, num_layers=1, max_seq_length=17)
-optimizer = Adam(model.parameters(), lr=0.01)
+optimizer = Adam(model.parameters(), lr=0.001)
 
 ####### TRAIN
 
 loss_history = model.train(small_data, num_epochs, batch_size, optimizer)
+
 # Plot the training losses ==> TO CHANGE FOR VISDOM LATER
 plt.plot(loss_history)
 plt.xlabel('Iteration')
