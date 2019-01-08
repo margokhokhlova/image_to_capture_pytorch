@@ -1,7 +1,7 @@
 from coco_utils import load_coco_data, sample_coco_minibatch, decode_captions
 from image_utils import image_from_url
 import numpy as np
-import matplotlib as plt
+import matplotlib.pyplot as plt
 import torch
 from torch.optim import Adam
 from model_text import Model_text_lstm
