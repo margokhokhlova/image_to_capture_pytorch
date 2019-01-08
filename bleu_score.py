@@ -30,6 +30,7 @@ def evaluate_model(model, med_data, idx_to_word, batch_size = 1000):
         features = torch.from_numpy(features) # make a tensor here
 
         sample_captions = model.sample(features)
+
         sample_captions = decode_captions(sample_captions, med_data['idx_to_word'])
 
         total_score = 0.0

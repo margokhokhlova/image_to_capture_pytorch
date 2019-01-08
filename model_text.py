@@ -164,7 +164,7 @@ class Model_text_lstm(nn.Module):
             captions[:, iteration] = x
             iteration +=1
 
-        return captions
+        return np.array(captions) # cast back to numpy
 
 
     def train(self, data, num_epochs, batch_size, optimizer):
@@ -200,7 +200,7 @@ class Model_text_lstm(nn.Module):
             if (self.epoch) % 5 == 0:
                 print('Epoch:  %d | Current Loss: %.4f' % (self.epoch, loss_history[-1]))
                 if self.epoch % 10 == 0:
-                    evaluate_model(self, data, batch_size=10) # evaluate the BLEU score from time to in a small batch time...
+                    evaluate_model(self, data, data['idx_to_word'], batch_size=10) # evaluate the BLEU score from time to in a small batch time...
 
         return loss_history
 

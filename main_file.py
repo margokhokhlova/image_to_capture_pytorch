@@ -2,7 +2,6 @@ from coco_utils import load_coco_data, sample_coco_minibatch, decode_captions
 from image_utils import image_from_url
 import numpy as np
 import matplotlib as plt
-from Toy_LSTM import Model_toy_lstm, temporal_softmax_loss
 import torch
 from torch.optim import Adam
 from model_text import Model_text_lstm
@@ -25,10 +24,10 @@ for k, v in data.items():
         print(k, type(v), len(v))
 
 # load a small samle of data and let's go!
-small_data = load_coco_data(max_train=3000)
+small_data = load_coco_data(max_train=1500)
 word2idx = data['word_to_idx']
 num_epochs = 30
-batch_size = 100
+batch_size = 50
 
 model = Model_text_lstm(embed_size=50, hidden_size=256, img_feat_size=512, word_2_idx=word2idx, num_layers=1, max_seq_length=17)
 optimizer = Adam(model.parameters(), lr=0.01)
