@@ -1,48 +1,20 @@
 from coco_utils import load_coco_data, sample_coco_minibatch, decode_captions
 from image_utils import image_from_url
 import numpy as np
-import matplotlib
+import matplotlib as plt
 from Toy_LSTM import Model_toy_lstm, temporal_softmax_loss
 import torch
 from torch.optim import Adam
 from model_text import Model_text_lstm
-import bleu_score
-
-def get_cap_lenght(captions, PAD):
-    ''' return lenght of sequences without padding'''
-    #for sentence in captions:
-    X_lengths = [len([x for x in w if x != PAD]) for w in captions]
-    #captions_sorted = [x for _, x in sorted(zip(X_lengths, captions), reverse=True)]
-    captions_sorted = [x for _, x in sorted(zip(X_lengths, captions), key=lambda pair: pair[0], reverse=True)]
-    return sorted(X_lengths, reverse=True), captions_sorted
+from  bleu_score import evaluate_model
 
 
-def evaluate_model(model):
-    """
-    model: CaptioningRNN model
-    Prints unigram BLEU score averaged over 1000 training and val examples.
-    """
-    for split in ['train', 'val']:
-        minibatch = sample_coco_minibatch(med_data, split=split, batch_size=1000)
-        gt_captions, features, urls = minibatch
-        gt_captions = decode_captions(gt_captions, data['idx_to_word'])
-
-        sample_captions = model.sample(features)
-        sample_captions = decode_captions(sample_captions, data['idx_to_word'])
-
-        total_score = 0.0
-        for gt_caption, sample_caption, url in zip(gt_captions, sample_captions, urls):
-            total_score += BLEU_score(gt_caption, sample_caption)
-
-        BLEUscores[split] = total_score / len(sample_captions)
-
-    for split in BLEUscores:
-        print('Average BLEU score for %s: %f' % (split, BLEUscores[split]))
-
+###### DATA LOAD
 
 # Load COCO data from disk; this returns a dictionary
 # We'll work with dimensionality-reduced features for this notebook, but feel
 # free to experiment with the original features by changing the flag below.
+
 data = load_coco_data(pca_features=True)
 
 # Print out all the keys and values from the data dictionary
@@ -52,53 +24,47 @@ for k, v in data.items():
     else:
         print(k, type(v), len(v))
 
-small_data = load_coco_data(max_train=50)
-minibatch = sample_coco_minibatch(small_data, batch_size=10, split='train')
-captions, features, urls = minibatch
-print(captions.shape)
-print(features.shape)
-
-
+# load a small samle of data and let's go!
+small_data = load_coco_data(max_train=3000)
 word2idx = data['word_to_idx']
-PAD = word2idx.get('<NULL>', None)
-# ## toy model test
-# captions = torch.LongTensor(captions)
-# model = Model_toy_lstm(embed_size=50, hidden_size=256, word_2_idx=word2idx, num_layers=1, max_seq_length=20)
-# optimizer = Adam(model.parameters(), lr=0.001)
-# output = model(captions)
-# loss = model.loss(output, captions)
-# loss.backward()
+num_epochs = 30
+batch_size = 100
 
-num_epochs = 10
-
-#captions_lengths, captions = get_cap_lenght(captions, PAD)
-
-model = Model_text_lstm(embed_size=50, hidden_size=256, word_2_idx=word2idx, num_layers=1, max_seq_length=20)
+model = Model_text_lstm(embed_size=50, hidden_size=256, img_feat_size=512, word_2_idx=word2idx, num_layers=1, max_seq_length=17)
 optimizer = Adam(model.parameters(), lr=0.001)
 
+####### TRAIN
+
+loss_history = model.train(small_data, num_epochs, batch_size, optimizer)
+# Plot the training losses ==> TO CHANGE FOR VISDOM LATER
+plt.plot(loss_history)
+plt.xlabel('Iteration')
+plt.ylabel('Loss')
+plt.title('Training loss history')
+plt.show()
 
 
-for i in range(num_epochs):
-    # training loop
-    train_running_loss = 0.0
-    train_acc = 0.0
-    model.train()
+#######  TEST
 
-    for batches in range(10):
-        small_data = load_coco_data(max_train=500)
-        minibatch = sample_coco_minibatch(small_data, batch_size=50, split='train')
-        captions, features, urls = minibatch
-        captions = torch.LongTensor(captions)
+# show some examples
+for split in ['train', 'val']:
+    minibatch = sample_coco_minibatch(small_data, batch_size=3, split=split)
+    captions, features, urls = minibatch
+    features = torch.from_numpy(features)
+    # sample some captions given image features
+    captions_out = model.sample(features)
 
-        # zero the parameter gradients
-        optimizer.zero_grad()
-        Y_hat = model(captions)
-        loss = model.loss(Y_hat, captions)
-        loss.backward()
-        optimizer.step()
-        train_running_loss += loss.detach().item()
-        #print('Epoch:  %d | Loss: %.4f' % (i,  train_running_loss))
-    model.eval()
-    print('Epoch:  %d | Average Loss: %.4f' % (i, train_running_loss / (i+1)))
+    gt_captions = decode_captions(captions,  data['idx_to_word'] )
+    sample_captions = decode_captions(captions_out,  data['idx_to_word'])
+    for gt_caption, sample_caption, url in zip(gt_captions, sample_captions, urls):
+        plt.imshow(image_from_url(url))
+        plt.title('%s\n%s\nGT:%s' % (split, sample_caption, gt_caption))
+        plt.axis('off')
+        plt.show()
+
+# calculate the BLEU score
+evaluate_model(model, small_data, data['idx_to_word'], batch_size=50)  # evaluate the BLEU score on 50 samples...
+
+
 
 
