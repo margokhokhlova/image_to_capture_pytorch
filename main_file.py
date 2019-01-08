@@ -31,7 +31,7 @@ num_epochs = 30
 batch_size = 100
 
 model = Model_text_lstm(embed_size=50, hidden_size=256, img_feat_size=512, word_2_idx=word2idx, num_layers=1, max_seq_length=17)
-optimizer = Adam(model.parameters(), lr=0.001)
+optimizer = Adam(model.parameters(), lr=0.01)
 
 ####### TRAIN
 

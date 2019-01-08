@@ -200,7 +200,7 @@ class Model_text_lstm(nn.Module):
             if (self.epoch) % 5 == 0:
                 print('Epoch:  %d | Current Loss: %.4f' % (self.epoch, loss_history[-1]))
                 if self.epoch % 10 == 0:
-                    evaluate_model(self, data, batch_size) # evaluate the BLEU score from time to time...
+                    evaluate_model(self, data, batch_size=10) # evaluate the BLEU score from time to in a small batch time...
 
         return loss_history
 
