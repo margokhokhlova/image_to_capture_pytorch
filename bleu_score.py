@@ -1,6 +1,8 @@
 from coco_utils import sample_coco_minibatch, decode_captions
 import nltk
 import torch
+device = (torch.device('cuda:0') if torch.cuda.is_available() else 'cpu')
+print("device  :",device)
 
 def BLEU_score(gt_caption, sample_caption):
     """
@@ -27,7 +29,7 @@ def evaluate_model(model, med_data, idx_to_word, batch_size = 1000):
         gt_captions, features, urls = minibatch
         gt_captions = decode_captions(gt_captions, med_data['idx_to_word'])
 
-        features = torch.from_numpy(features) # make a tensor here
+        features = torch.from_numpy(features).to(device) # make a tensor here
 
         sample_captions = model.sample(features)
 
