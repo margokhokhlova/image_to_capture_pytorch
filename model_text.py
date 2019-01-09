@@ -5,7 +5,7 @@ import numpy as np
 from coco_utils import  sample_coco_minibatch
 from bleu_score import evaluate_model
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
 
 
@@ -62,6 +62,45 @@ class Model_text_lstm(nn.Module):
         return hidden_h, hidden_c
 
 
+    def temporal_softmax_loss(self, x, y, mask, verbose=False):
+        """
+        A temporal version of softmax loss for use in RNNs. We assume that we are
+        making predictions over a vocabulary of size V for each timestep of a
+        timeseries of length T, over a minibatch of size N. The input x gives scores
+        for all vocabulary elements at all timesteps, and y gives the indices of the
+        ground-truth element at each timestep. We use a cross-entropy loss at each
+        timestep, summing the loss over all timesteps and averaging across the
+        minibatch.
+        As an additional complication, we may want to ignore the model output at some
+        timesteps, since sequences of different length may have been combined into a
+        minibatch and padded with NULL tokens. The optional mask argument tells us
+        which elements should contribute to the loss.
+
+        Inputs:
+        - x: Input scores, of shape (N, T, V)
+        - y: Ground-truth indices, of shape (N, T) where each element is in the range
+             0 <= y[i, t] < V
+        - mask: Boolean array of shape (N, T) where mask[i, t] tells whether or not
+          the scores at x[i, t] should contribute to the loss.
+
+        Returns :
+        - loss: Scalar giving loss
+        """
+
+        N, T, V = x.shape
+
+        x_flat = x.reshape(N * T, V)
+        y_flat = y.reshape(N * T)
+        mask_flat = mask.reshape(N * T)
+        maximums, _ = x_flat.max(1)
+        probs = torch.exp(x_flat.transpose(-1,0) - maximums).transpose(-1,0)
+        probs = torch.div(probs, torch.sum(probs, 0))
+        val = torch.log(probs[torch.arange(N * T), y_flat])
+        loss = -torch.sum(mask_flat * val ) / N
+        return loss
+
+
+
     def forward(self, features, X):
 
 
@@ -99,9 +138,7 @@ class Model_text_lstm(nn.Module):
         X = self.hidden_to_vocab(X)
 
         # ---------------------
-        # 4. Create softmax activations bc we're doing classification
-        # Dim transformation: (batch_size * seq_len, nb_lstm_units) -> (batch_size, seq_len, nb_tags)
-        X = F.log_softmax(X, dim=1)
+        # X = F.log_softmax(X, dim=1) # I do it in my loss function!
 
         # I like to reshape for mental sanity so we're back to (batch_size, seq_len, words)
         X = X.view(batch_size, seq_len, self.nb_vocab_words)
@@ -111,27 +148,9 @@ class Model_text_lstm(nn.Module):
 
 
     def loss(self, Y_hat, Y): # , X_lengths maybe also this
-        #
-        # before we calculate the negative log likelihood, we need to mask out the activations
-        # this means we don't want to take into account padded items in the output vector
-        # flatten all the labels
-        Y = Y.view(-1)
-
-        # flatten all predictions
-        Y_hat = Y_hat.view(-1, self.nb_vocab_words)
-
-        # create a mask by filtering out all tokens that ARE NOT the padding token
         tag_pad_token = self._null
         mask = (Y > tag_pad_token).float()
-
-        # count how many actual words is there
-        nb_tokens = int(torch.sum(mask).item())
-
-        # pick the values for the label and zero out the rest with the mask
-        Y_hat = Y_hat[range(Y_hat.shape[0]), Y] * mask
-
-        # compute cross entropy loss which ignores all <PAD> tokens
-        ce_loss = -torch.sum(Y_hat) / nb_tokens
+        ce_loss = self.temporal_softmax_loss(Y_hat, Y, mask)
 
         return ce_loss
 
@@ -176,7 +195,9 @@ class Model_text_lstm(nn.Module):
         num_iterations = num_epochs * iterations_per_epoch
         # training loop
         train_running_loss = 0.0
+        loss = 0.0
         train_acc = 0.0
+        optimizer.zero_grad()  
         # zero the parameter gradients
 
         for i in range(num_iterations):
@@ -190,13 +211,12 @@ class Model_text_lstm(nn.Module):
             loss.backward()
             optimizer.step()  # Updates all the weights of the network
             train_running_loss += loss.detach().item()  # I don't really use it but nevertheless
-
+            optimizer.zero_grad()  # where shall I make it? maybe for every batch?
             # At the end of every epoch, increment the epoch counter and decay the
             # learning rate.
             epoch_end = (i + 1) % iterations_per_epoch == 0
             if epoch_end:
                 self.epoch +=1
-                optimizer.zero_grad()  # where shall I make it? maybe for every batch?pico 
                 train_running_loss = 0.0 # update training loss per epochs
                 if (self.epoch) % 5 == 0:
                     print('Epoch:  %d | Current Loss: %.4f' % (self.epoch, loss_history[-1]))
