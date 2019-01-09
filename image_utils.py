@@ -4,6 +4,7 @@ standard_library.install_aliases()
 from builtins import range
 import urllib.request, urllib.error, urllib.parse, os, tempfile
 
+
 import numpy as np
 from scipy.misc import imread, imresize
 
@@ -64,7 +65,8 @@ def image_from_url(url):
         with open(fname, 'wb') as ff:
             ff.write(f.read())
         img = imread(fname)
-        os.remove(fname)
+        #os.unlink(fname) # instead of remove
+
         return img
     except urllib.error.URLError as e:
         print('URL Error: ', e.reason, url)

@@ -7,6 +7,12 @@ from torch.optim import Adam
 from model_text import Model_text_lstm
 from  bleu_score import evaluate_model
 
+from pre_trained_embeddings import readGloveFile, get_embedding_matrix
+
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
+device = (torch.device('cuda:0') if torch.cuda.is_available() else 'cpu')
+print("device  :",device)
 
 ###### DATA LOAD
 
@@ -23,34 +29,47 @@ for k, v in data.items():
     else:
         print(k, type(v), len(v))
 
-# load a small samle of data and let's go!
-small_data = load_coco_data(max_train=1500)
-word2idx = data['word_to_idx']
-num_epochs = 10
-batch_size = 50
+######### EMBEDDINGS FOR THE TEXT
+# ## Load Embeddings
+# print('Load Embeddings')
+# GLOVE_DIR = 'embeddings/'
+# embeddings_index = readGloveFile(GLOVE_DIR)
+# # print(embeddings_index)
+#
+# embedding_weights = get_embedding_matrix(data['word_to_idx'], data['idx_to_word'], embeddings_index)
 
-model = Model_text_lstm(embed_size=50, hidden_size=256, img_feat_size=512, word_2_idx=word2idx, num_layers=1, max_seq_length=17)
-optimizer = Adam(model.parameters(), lr=0.001)
+
+# load a small samle of data and let's go!
+small_data = load_coco_data(max_train=50)
+word2idx = data['word_to_idx']
+num_epochs = 50
+batch_size = 25
+
+model = Model_text_lstm(embed_size=50, hidden_size=256, img_feat_size=512, word_2_idx=word2idx,
+                        num_layers=1, max_seq_length=17, device=device)
+optimizer = Adam(model.parameters(), lr=5e-3)
+
+####### DEVICE
+model.to(device)
 
 ####### TRAIN
 
 loss_history = model.train(small_data, num_epochs, batch_size, optimizer)
 
-# Plot the training losses ==> TO CHANGE FOR VISDOM LATER
-plt.plot(loss_history)
-plt.xlabel('Iteration')
-plt.ylabel('Loss')
-plt.title('Training loss history')
-plt.show()
+# # Plot the training losses ==> TO CHANGE FOR VISDOM LATER
+# plt.plot(loss_history)
+# plt.xlabel('Iteration')
+# plt.ylabel('Loss')
+# plt.title('Training loss history')
+# plt.show()
 
 
 #######  TEST
 
 # show some examples
 for split in ['train', 'val']:
-    minibatch = sample_coco_minibatch(small_data, batch_size=3, split=split)
+    minibatch = sample_coco_minibatch(small_data, batch_size=2, split=split)
     captions, features, urls = minibatch
-    features = torch.from_numpy(features)
     # sample some captions given image features
     captions_out = model.sample(features)
 
