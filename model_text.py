@@ -34,8 +34,7 @@ class Model_text_lstm(nn.Module):
 
         self.word_embedding = nn.Embedding(
             num_embeddings=self.nb_vocab_words,
-            embedding_dim=self.embedding_dim,
-            padding_idx=self._null)
+            embedding_dim=self.embedding_dim)
 
         # design LSTM
         self.lstm = nn.LSTM(
@@ -183,7 +182,8 @@ class Model_text_lstm(nn.Module):
         return ce_loss
 
     def sample(self, features):
-        """ function which samples the captions from a pre-trained model"""
+        """ function which samples the captions from a pre-trained model
+        features - image features """
         features = torch.from_numpy(features).to(self.device)  # make a tensor here
 
         N = features.shape[0] # Batch size
@@ -197,11 +197,12 @@ class Model_text_lstm(nn.Module):
         iteration = 1
         while iteration < self.max_seq_length:
             # for all the words
-            onehots = torch.eye(self.nb_vocab_words, dtype=torch.int64)[captions[:, iteration-1]].to(self.device)
+            onehots = captions[:,iteration-1]
             word_vectors = self.word_embedding(onehots)
-            _, (self.hidden_h, self.hidden_c) = self.lstm(word_vectors, (self.hidden_h, self.hidden_c))
+            inputs = word_vectors.unsqueeze(1)
+            X, (self.hidden_h, self.hidden_c) = self.lstm(inputs, (self.hidden_h, self.hidden_c))
 
-            X = self.hidden_h.contiguous() # get the last hidden layer
+            X = X.contiguous() # get the last hidden layer
             X = X.view(-1, X.shape[2])
 
             # run through actual linear layer

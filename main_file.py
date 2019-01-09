@@ -29,13 +29,13 @@ for k, v in data.items():
         print(k, type(v), len(v))
 
 # load a small samle of data and let's go!
-small_data = load_coco_data(max_train=50)
+small_data = load_coco_data(max_train=10000)
 word2idx = data['word_to_idx']
-num_epochs = 100
-batch_size = 25
+num_epochs = 250
+batch_size = 100
 
 model = Model_text_lstm(embed_size=256, hidden_size=512, img_feat_size=512, word_2_idx=word2idx, num_layers=1, max_seq_length=17, device=device)
-optimizer = Adam(model.parameters(), lr=0.001)
+optimizer = Adam(model.parameters(), lr=5e-3)
 
 ####### DEVICE
 model.to(device)
