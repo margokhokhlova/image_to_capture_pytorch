@@ -160,6 +160,7 @@ class Model_text_lstm(nn.Module):
         N = features.shape[0]
 
         captions = self._null * torch.zeros([N, self.max_seq_length], dtype=torch.int64).to(self.device) # prepare the output
+        captions[:, 0] = self._start # start with start
         imf2hid = self.image_embedding(features)  # initial hidden state: [N, H]
         self.hidden_h =  imf2hid.unsqueeze(0)#
         self.hidden_c = torch.zeros_like(self.hidden_h)
