@@ -5,13 +5,11 @@ import numpy as np
 from coco_utils import  sample_coco_minibatch
 from bleu_score import evaluate_model
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-print(device)
 
 
 class Model_text_lstm(nn.Module):
 
-    def __init__(self, embed_size, img_feat_size, hidden_size, word_2_idx, num_layers, max_seq_length=17):
+    def __init__(self, embed_size, img_feat_size, hidden_size, word_2_idx, num_layers, max_seq_length=17, device = 'cpu'):
         """Set the hyper-parameters and build the layers."""
         super(Model_text_lstm, self).__init__()
 
@@ -48,13 +46,15 @@ class Model_text_lstm(nn.Module):
 
         # output layer which projects back to tag space
         self.hidden_to_vocab = nn.Linear(self.hidden_size, self.nb_vocab_words)
+        self.device = device
+
 
 
     def init_hidden(self, X, image_feat = None):
         batch_size, D, _ = X.shape
         # the weights are of the form (nb_layers, batch_size, nb_lstm_units)
-        hidden_h = torch.randn(self.num_layers, batch_size, self.hidden_size).to(device)
-        hidden_c = torch.randn(self.num_layers, batch_size, self.hidden_size).to(device)
+        hidden_h = torch.randn(self.num_layers, batch_size, self.hidden_size).to(self.device)
+        hidden_c = torch.randn(self.num_layers, batch_size, self.hidden_size).to(self.device)
 
         if image_feat is not None:
             # then use the embedded image as a hidden layer
@@ -156,9 +156,10 @@ class Model_text_lstm(nn.Module):
 
     def sample(self, features):
         """ function which samples the captions from a pre-trained model"""
+        features = torch.from_numpy(features).to(self.device)  # make a tensor here
         N = features.shape[0]
 
-        captions = self._null * torch.zeros([N, self.max_seq_length], dtype=torch.int64).to(device) # prepare the output
+        captions = self._null * torch.zeros([N, self.max_seq_length], dtype=torch.int64).to(self.device) # prepare the output
         imf2hid = self.image_embedding(features)  # initial hidden state: [N, H]
         self.hidden_h =  imf2hid.unsqueeze(0)#
         self.hidden_c = torch.zeros_like(self.hidden_h)
@@ -166,7 +167,7 @@ class Model_text_lstm(nn.Module):
         iteration = 1
         while(iteration<self.max_seq_length):
             # for all the words
-            onehots = torch.eye(self.nb_vocab_words, dtype=torch.int64)[captions[:, iteration-1]].to(device)
+            onehots = torch.eye(self.nb_vocab_words, dtype=torch.int64)[captions[:, iteration-1]].to(self.device)
             word_vectors = self.word_embedding(onehots)
             _, (self.hidden_h, self.hidden_c) = self.lstm(word_vectors, (self.hidden_h, self.hidden_c))
 
@@ -203,8 +204,8 @@ class Model_text_lstm(nn.Module):
         for i in range(num_iterations):
             minibatch = sample_coco_minibatch(data, batch_size=batch_size, split='train')
             captions, features, urls = minibatch
-            captions = torch.LongTensor(captions).to(device)
-            features = torch.from_numpy(features).to(device)
+            captions = torch.LongTensor(captions).to(self.device)
+            features = torch.from_numpy(features).to(self.device)
             Y_hat = self.forward(features, captions)
             loss = self.loss(Y_hat, captions)
             loss_history.append(loss)  # save loss

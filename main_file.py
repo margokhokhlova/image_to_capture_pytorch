@@ -31,11 +31,11 @@ for k, v in data.items():
 # load a small samle of data and let's go!
 small_data = load_coco_data(max_train=5000)
 word2idx = data['word_to_idx']
-num_epochs = 50
+num_epochs = 500
 batch_size = 100
 
-model = Model_text_lstm(embed_size=50, hidden_size=256, img_feat_size=512, word_2_idx=word2idx, num_layers=1, max_seq_length=17)
-optimizer = Adam(model.parameters(), lr=0.001)
+model = Model_text_lstm(embed_size=50, hidden_size=256, img_feat_size=512, word_2_idx=word2idx, num_layers=1, max_seq_length=17, device=device)
+optimizer = Adam(model.parameters(), lr=0.01)
 
 ####### DEVICE
 model.to(device)
