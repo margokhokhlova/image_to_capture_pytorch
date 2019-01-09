@@ -7,6 +7,7 @@ from bleu_score import evaluate_model
 
 
 
+
 class Model_text_lstm(nn.Module):
 
     def __init__(self, embed_size, img_feat_size, hidden_size, word_2_idx, num_layers, max_seq_length=17, device = 'cpu'):
@@ -48,8 +49,6 @@ class Model_text_lstm(nn.Module):
         self.hidden_to_vocab = nn.Linear(self.hidden_size, self.nb_vocab_words)
         self.device = device
 
-
-
     def init_hidden(self, X, image_feat = None):
         batch_size, D, _ = X.shape
         # the weights are of the form (nb_layers, batch_size, nb_lstm_units)
@@ -61,6 +60,17 @@ class Model_text_lstm(nn.Module):
             hidden_h = image_feat.unsqueeze(0)#image_feat.view(1, -1, -1)
         return hidden_h, hidden_c
 
+    def _reset(self):
+        """
+        Set up some book-keeping variables for optimization. Not sure I need it
+        """
+        # Set up some variables for book-keeping
+        self.epoch = 0
+        self.best_val_acc = 0
+        self.best_params = {}
+        self.loss_history = []
+        self.train_acc_history = []
+        self.val_acc_history = []
 
     def temporal_softmax_loss(self, x, y, mask, verbose=False):
         """
@@ -93,17 +103,13 @@ class Model_text_lstm(nn.Module):
         y_flat = y.reshape(N * T)
         mask_flat = mask.reshape(N * T)
         maximums, _ = x_flat.max(1)
-        probs = torch.exp(x_flat.transpose(-1,0) - maximums).transpose(-1,0)
-        probs = torch.div(probs, torch.sum(probs, 0))
+        probs = torch.exp(x_flat.transpose(-1,0) - maximums).transpose(-1,0) # softmax
+        probs = torch.div(probs, torch.sum(probs, 0)) # softmax
         val = torch.log(probs[torch.arange(N * T), y_flat])
         loss = -torch.sum(mask_flat * val ) / N
         return loss
 
-
-
     def forward(self, features, X):
-
-
 
         batch_size, seq_len = X.shape
         #seq_len = X_lengths[0] # take the longest sentence
@@ -138,18 +144,40 @@ class Model_text_lstm(nn.Module):
         X = self.hidden_to_vocab(X)
 
         # ---------------------
-        # X = F.log_softmax(X, dim=1) # I do it in my loss function!
+        # 4. Create softmax activations
+        # Dim transformation: (batch_size * seq_len, nb_lstm_units) -> (batch_size, seq_len, nb_tags)
+        #X = F.log_softmax(X, dim=1)
 
         # I like to reshape for mental sanity so we're back to (batch_size, seq_len, words)
         X = X.view(batch_size, seq_len, self.nb_vocab_words)
 
         Y_hat = X
+
         return Y_hat
 
 
     def loss(self, Y_hat, Y): # , X_lengths maybe also this
+
+        # #
+        # # before we calculate the negative log likelihood, we need to mask out the activations
+        # # this means we don't want to take into account padded items in the output vector
+        # # flatten all the labels
+        # Y = Y.view(-1)
+        #
+        # # flatten all predictions
+        # #Y_hat = Y_hat.view(-1, self.nb_vocab_words)
+        # #Y_hat = Y_hat.view(-1)
+        # # create a mask by filtering out all tokens that ARE NOT the padding token
         tag_pad_token = self._null
         mask = (Y > tag_pad_token).float()
+
+        # # count how many actual words is there
+        # nb_tokens = int(torch.sum(mask).item())
+        #
+        # # pick the values for the label and zero out the rest with the mask
+        # Y_hat = Y_hat[range(Y_hat.shape[0]), Y] * mask
+
+        # compute cross entropy loss which ignores all <PAD> tokens
         ce_loss = self.temporal_softmax_loss(Y_hat, Y, mask)
 
         return ce_loss
@@ -157,16 +185,17 @@ class Model_text_lstm(nn.Module):
     def sample(self, features):
         """ function which samples the captions from a pre-trained model"""
         features = torch.from_numpy(features).to(self.device)  # make a tensor here
-        N = features.shape[0]
 
+        N = features.shape[0] # Batch size
         captions = self._null * torch.zeros([N, self.max_seq_length], dtype=torch.int64).to(self.device) # prepare the output
         captions[:, 0] = self._start # start with start
+
         imf2hid = self.image_embedding(features)  # initial hidden state: [N, H]
-        self.hidden_h =  imf2hid.unsqueeze(0)#
+        self.hidden_h = imf2hid.unsqueeze(0)#
         self.hidden_c = torch.zeros_like(self.hidden_h)
 
         iteration = 1
-        while(iteration<self.max_seq_length):
+        while iteration < self.max_seq_length:
             # for all the words
             onehots = torch.eye(self.nb_vocab_words, dtype=torch.int64)[captions[:, iteration-1]].to(self.device)
             word_vectors = self.word_embedding(onehots)
@@ -177,30 +206,31 @@ class Model_text_lstm(nn.Module):
 
             # run through actual linear layer
             X = self.hidden_to_vocab(X)
-
             # Create softmax activations bc we're doing classification
             # Dim transformation: (batch_size * seq_len, nb_lstm_units) -> (batch_size, seq_len, nb_wirds)
-            X = F.log_softmax(X, dim=1)
+            #X = F.log_softmax(X, dim=1) # for some reason, no softmax during sampling?
             _, x = X.max(1) # so predict here
+
             captions[:, iteration] = x
-            iteration +=1
+            iteration += 1
+            #print(captions) #show the iteration change of caption vector
+
 
         return np.array(captions) # cast back to numpy
 
 
     def train(self, data, num_epochs, batch_size, optimizer):
+
+        self._reset() # reset the model
+        optimizer.zero_grad()  # where shall I make it?
+        loss = 0.0
+
         print('Training...')
-        loss_history = []
-        self.epoch = 0
         num_train = data['train_captions'].shape[0]
         iterations_per_epoch = np.int(num_train // batch_size)
         num_iterations = num_epochs * iterations_per_epoch
-        # training loop
-        train_running_loss = 0.0
-        loss = 0.0
-        train_acc = 0.0
-        optimizer.zero_grad()  
-        # zero the parameter gradients
+
+
 
         for i in range(num_iterations):
             minibatch = sample_coco_minibatch(data, batch_size=batch_size, split='train')
@@ -209,33 +239,26 @@ class Model_text_lstm(nn.Module):
             features = torch.from_numpy(features).to(self.device)
             Y_hat = self.forward(features, captions)
             loss = self.loss(Y_hat, captions)
-            loss_history.append(loss)  # save loss
+            self.loss_history.append(loss)  # save loss
             loss.backward()
             optimizer.step()  # Updates all the weights of the network
-            train_running_loss += loss.detach().item()  # I don't really use it but nevertheless
-            optimizer.zero_grad()  # where shall I make it? maybe for every batch?
             # At the end of every epoch, increment the epoch counter and decay the
             # learning rate.
             epoch_end = (i + 1) % iterations_per_epoch == 0
             if epoch_end:
-                self.epoch +=1
-                train_running_loss = 0.0 # update training loss per epochs
-                if (self.epoch) % 5 == 0:
-                    print('Epoch:  %d | Current Loss: %.4f' % (self.epoch, loss_history[-1]))
+                self.epoch += 1
+                optimizer.zero_grad()  # where shall I make it? maybe for every batch? or for every epoch?
+
+                if (self.epoch) % 1 == 0:
+                    print('Epoch:  %d | Current Loss: %.4f' % (self.epoch, self.loss_history[-1]))
                     if self.epoch % 10 == 0:
-                        evaluate_model(self, data, data['idx_to_word'], batch_size=10) # evaluate the BLEU score from time to in a small batch time...
+                        val_accuracy = evaluate_model(self, data, data['idx_to_word'], batch_size=10) # evaluate the BLEU score from time to in a small batch time...
+                        self.val_acc_history.append(val_accuracy)
+                        if val_accuracy > self.best_val_acc:
+                            self.best_val_acc = val_accuracy
+                            torch.save(self, 'models/best_validation.pytorch')
 
         torch.save(self, 'models/current_model.pytorch') # maybe to save the model giving the best BLEU score?
-        return loss_history
-
-
-
-
-
-
-
-
-
-
+        return self.loss_history
 
 

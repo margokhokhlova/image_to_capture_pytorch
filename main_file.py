@@ -29,13 +29,13 @@ for k, v in data.items():
         print(k, type(v), len(v))
 
 # load a small samle of data and let's go!
-small_data = load_coco_data(max_train=5000)
+small_data = load_coco_data(max_train=50)
 word2idx = data['word_to_idx']
-num_epochs = 500
-batch_size = 100
+num_epochs = 100
+batch_size = 25
 
-model = Model_text_lstm(embed_size=50, hidden_size=256, img_feat_size=512, word_2_idx=word2idx, num_layers=1, max_seq_length=17, device=device)
-optimizer = Adam(model.parameters(), lr=0.01)
+model = Model_text_lstm(embed_size=256, hidden_size=512, img_feat_size=512, word_2_idx=word2idx, num_layers=1, max_seq_length=17, device=device)
+optimizer = Adam(model.parameters(), lr=0.001)
 
 ####### DEVICE
 model.to(device)
@@ -57,26 +57,27 @@ loss_history = model.train(small_data, num_epochs, batch_size, optimizer)
 
 # #######  TEST
 
-# # show some examples
-# for split in ['train', 'val']:
-#     minibatch = sample_coco_minibatch(small_data, batch_size=3, split=split)
-#     captions, features, urls = minibatch
-#     features = torch.from_numpy(features)
-#     # sample some captions given image features
-#     captions_out = model.sample(features)
+# show some examples
+print("print some examples...")
+for split in ['train', 'val']:
+    minibatch = sample_coco_minibatch(small_data, batch_size=3, split=split)
+    captions, features, urls = minibatch
+    # sample some captions given image features
+    captions_out = model.sample(features)
 
-#     gt_captions = decode_captions(captions,  data['idx_to_word'] )
-#     sample_captions = decode_captions(captions_out,  data['idx_to_word'])
-#     for gt_caption, sample_caption, url in zip(gt_captions, sample_captions, urls):
-#         plt.imshow(image_from_url(url))
-#         plt.title('%s\n%s\nGT:%s' % (split, sample_caption, gt_caption))
-#         plt.axis('off')
-#         plt.show()
+    gt_captions = decode_captions(captions,  data['idx_to_word'] )
+    sample_captions = decode_captions(captions_out,  data['idx_to_word'])
+    for gt_caption, sample_caption, url in zip(gt_captions, sample_captions, urls):
+        # plt.imshow(image_from_url(url))
+        # plt.title('%s\n%s\nGT:%s' % (split, sample_caption, gt_caption))
+        # plt.axis('off')
+        # plt.show()
+        print('%s\n%s\nGT:%s' % (split, sample_caption, gt_caption))
 
 # calculate the BLEU score
 
 print("evaluating the model using the BLEU score after the training is finished: ")
-evaluate_model(model, small_data, data['idx_to_word'], batch_size=50)  # evaluate the BLEU score on 50 samples...
+evaluate_model(model, small_data, data['idx_to_word'], batch_size=1)  # evaluate the BLEU score on 50 samples...
 
 
 
