@@ -4,7 +4,7 @@ import numpy as np
 import h5py
 
 #BASE_DIR = 'cs231n/datasets/coco_captioning'
-BASE_DIR = 'D:/programming/ConvNets_CS231n/assignment3/cs231n/datasets/coco_captioning'
+BASE_DIR = '/data/khokhlov/datasets/coco_captioning'
 
 def load_coco_data(base_dir=BASE_DIR,
                    max_train=None,
