@@ -6,7 +6,32 @@ from coco_utils import  sample_coco_minibatch
 from bleu_score import evaluate_model
 
 
+def maximums(T, N):
+    """returns the N higher values in tensor T, with their positions,
+        along dimension 2
 
+    inputs :
+        - T : (1, 1, E) tensor
+        - N : int
+    outputs :
+        (max_val, max_ind) list
+            max_val : float
+            max_ind : (1) LongTensor 	"""
+
+    T_copy = T.clone()  # les valeurs de T_copy seront modifiées, pas celles du tenseur original
+    infinity = (T.abs()).sum(dim=(0,1,2)).item()+1
+    # everytime a maximum has been found, the tensor is modified so that we dont find it again
+    result = []
+
+    for i in range(N):
+        max_val, max_ind = T_copy.max(dim=2)
+        max_val = max_val.item()
+
+        T_copy[0, 0, max_ind.item()] -= infinity  # Cette valeur-là ne sera plus jamais prise
+
+        result.append((max_val, max_ind.view(1)))
+
+    return result
 
 
 class Model_text_lstm(nn.Module):
@@ -196,7 +221,9 @@ class Model_text_lstm(nn.Module):
 
     def sample(self, features):
         """ function which samples the captions from a pre-trained model
-        features - image features """
+        features - image features
+
+        """
         features = torch.from_numpy(features).to(self.device)  # make a tensor here
 
         N = features.shape[0] # Batch size
@@ -207,11 +234,10 @@ class Model_text_lstm(nn.Module):
         self.hidden_h = imf2hid.unsqueeze(0)#
         self.hidden_c = torch.zeros_like(self.hidden_h)
 
+
         iteration = 1
         while iteration < self.max_seq_length:
             # for all the words
-
-            #onehots = torch.eye(self.nb_vocab_words, dtype=torch.int64)[captions[:, iteration-1]].to(self.device)
             onehots = captions[:,iteration-1]
             word_vectors = self.word_embedding(onehots)
             inputs = word_vectors.unsqueeze(1)
@@ -271,18 +297,18 @@ class Model_text_lstm(nn.Module):
 
             loss.backward()
             optimizer.step()  # Updates all the weights of the network
-
+            optimizer.zero_grad()  #
             # At the end of every epoch, increment the epoch counter and decay the
             # learning rate.
             epoch_end = (i + 1) % iterations_per_epoch == 0
             if epoch_end:
                 self.epoch += 1
-                optimizer.zero_grad()  # where shall I make it? maybe for every batch? or for every epoch?
+
 
                 if (self.epoch) % 1 == 0:
                     print('Epoch:  %d | Current Loss: %.4f' % (self.epoch, self.loss_history[-1]))
                     if self.epoch % 5 == 0:
-                        val_accuracy = evaluate_model(self, data, data['idx_to_word'], batch_size=1) # evaluate the BLEU score from time to in a small batch time...
+                        val_accuracy = evaluate_model(self, data, data['idx_to_word'], batch_size=40) # evaluate the BLEU score from time to in a small batch time...
                         self.val_acc_history.append(val_accuracy)
                         if val_accuracy > self.best_val_acc:
                             self.best_val_acc = val_accuracy
@@ -290,6 +316,74 @@ class Model_text_lstm(nn.Module):
 
         torch.save(self, 'models/current_model.pytorch') # maybe to save the model giving the best BLEU score?
         return self.loss_history
+
+
+    def beam_decode(self, features, beam_size = 3):
+       ''' version with a single sample and the beam_search
+       features = 1 single image
+       Quick explanation :
+            S = beam size
+            all the kept beams are in a list (best_beams). At first, it starts with only 1 element, the <BOS> tag.
+            For every letter we add :
+                For every current_beam in the list :
+                    compute the best S beams starting from current_beam
+                    add them to the next_best_beams list
+                next_best_beams now has S² elements
+                put the S best beams of next_best_beams in the best_beams list
+            return best_beams[0]
+
+            One beam is a 5-tuple (conditional probability, hidden_states_top, hidden_states_bot, previous letters, previous letter probabilities)
+        """
+        '''
+       features = torch.from_numpy(features).to(self.device)  # make a tensor here
+       imf2hid = self.image_embedding(features)  # initial hidden state: [N, H]
+       hidden_h = imf2hid.unsqueeze(0)  #
+       hidden_c = torch.zeros_like(hidden_h)
+
+       wordlist = torch.tensor([self._start]).long().to(self.device)  # On initialise la phrase avec un <BOS>
+       out = torch.zeros(1, 1, self.nb_vocab_words).to(self.device) # for the probability
+       out[0, 0, self._start] = 1 # because the probability is 1 for start word
+
+       best_beams = [(1, (hidden_h, hidden_c), wordlist, out)]
+       iteration = 1
+       while iteration < self.max_seq_length:
+           next_best_beams = []
+           # for all the words
+           for (p_cond, (hidden_h, hidden_c), wordlist, out) in best_beams:
+               last_word = wordlist[-1].view(1, 1)
+               if last_word.item() == self._end:  # 2 is the <EOS> tag index
+                   # do not change a thing
+                   next_best_beams.append((p_cond, (hidden_h, hidden_c), wordlist, out))
+               else:
+                   last_word_embedded = self.word_embedding(last_word)
+                   inputs = last_word_embedded
+                   X, (hidden_h, hidden_c) = self.lstm(inputs, (hidden_h, hidden_c))
+                   X = X.contiguous()  # get the last hidden layer
+                   X = X.view(-1, X.shape[2])
+                   # run through actual linear layer
+                   X = self.hidden_to_vocab(X)
+                   X = X.unsqueeze(0)
+                   out = torch.cat([out, X], dim=0) # save the scores
+                   maxs_list = maximums(F.softmax(X, dim=2), beam_size)
+                   next_best_beams += [(p_cond * value, (hidden_h, hidden_c),
+                                        torch.cat([wordlist, lastword], dim=0), out) for (value, lastword) in
+                                       maxs_list]
+
+                   # end for {beam in best_beams}
+
+           # restrict to a fixed number
+           next_best_beams.sort(key=lambda x: -x[0])  # tri par probabilité **décroissante** (d'où le "-")
+           next_best_beams = next_best_beams[:beam_size]  # restriction
+
+           best_beams = next_best_beams
+           iteration += 1
+           # end while {t<T}
+
+       wordlist = best_beams[0][2]
+       out = best_beams[0][3]
+       out = out.view(out.shape[0], 1, -1)
+
+       return out, np.array(wordlist)
 
 
 
