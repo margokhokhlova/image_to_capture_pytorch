@@ -2,10 +2,16 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import numpy as np
-from coco_utils import  sample_coco_minibatch
+from coco_utils import  sample_coco_minibatch, decode_captions
 from bleu_score import evaluate_model
-
-
+# import EarlyStopping
+from pytorchtools import EarlyStopping
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim import Adam
+from torchvision.utils import save_image
+from image_utils import image_from_url
+from Visdom_grapher import VisdomGrapher
+import matplotlib.pyplot as plt
 def maximums(T, N):
     """returns the N higher values in tensor T, with their positions,
         along dimension 2
@@ -76,6 +82,7 @@ class Model_text_lstm(nn.Module):
             batch_first=True,
         )
 
+        self.droplayer  =nn.Dropout(0.4) # to add some regularization
         # output layer which projects back to tag space
         self.hidden_to_vocab = nn.Linear(self.hidden_size, self.nb_vocab_words)
 
@@ -98,7 +105,6 @@ class Model_text_lstm(nn.Module):
         Set up some book-keeping variables for optimization. Not sure I need it
         """
         # Set up some variables for book-keeping
-        self.epoch = 0
         self.best_val_acc = 0
         self.best_params = {}
         self.loss_history = []
@@ -185,6 +191,8 @@ class Model_text_lstm(nn.Module):
         # undo the packing operation
         #X, _ = torch.nn.utils.rnn.pad_packed_sequence(X, batch_first=True)
 
+        X = self.droplayer(X)
+
         # ---------------------
         # 3. Project back to vocab space
         # Dim transformation: (batch_size, seq_len, nb_lstm_units) -> (batch_size * seq_len, nb_lstm_units)
@@ -192,6 +200,7 @@ class Model_text_lstm(nn.Module):
         # this one is a bit tricky as well. First we need to reshape the data so it goes into the linear layer
         X = X.contiguous()
         X = X.view(-1, X.shape[2])
+
 
         # run through actual linear layer
         X = self.hidden_to_vocab(X)
@@ -258,63 +267,67 @@ class Model_text_lstm(nn.Module):
             #print(captions) #show the iteration change of caption vector
 
 
-        return np.array(captions) # cast back to numpy
+        return np.array(captions.cpu()) # cast back to numpy
 
 
-    def train(self, data, num_epochs, batch_size, optimizer):
+    def train_val_step(self, data, batch_size, optimizer, train_mode = True):
+        optimizer.zero_grad()
+        if train_mode:
+            minibatch = sample_coco_minibatch(data, batch_size=batch_size, split='train')
+        else:
+            minibatch = sample_coco_minibatch(data, batch_size=batch_size, split='val')
+        captions, features, urls = minibatch
+        captions = torch.LongTensor(captions).to(self.device)
+        features = torch.from_numpy(features).to(self.device)
+        captions_in = captions[:, :-1]
+        captions_out = captions[:, 1:]
+        Y_hat = self.forward(features, captions_in)
+        loss = self.loss(Y_hat, captions_out)
+        if train_mode:
+            loss.backward()
+            optimizer.step()
+        return loss
+
+
+    def train(self, data, num_epochs, batch_size, optimizer, env_name, use_visdom = None):
 
         self._reset() # reset the model
-        optimizer.zero_grad()  # where shall I make it?
-        loss = 0.0
+        scheduler = ReduceLROnPlateau(optimizer, 'min', verbose=True) #to reduce lr
+        early_stopping = EarlyStopping(patience = 100, verbose = True) #criteria of stopping
+        if use_visdom is not None:
+            vis = VisdomGrapher(env_name=env_name, server=use_visdom)
 
         print('Training...')
         num_train = data['train_captions'].shape[0]
         iterations_per_epoch = np.int(num_train // batch_size)
         num_iterations = num_epochs * iterations_per_epoch
-
-
-
         for i in range(num_iterations):
-            minibatch = sample_coco_minibatch(data, batch_size=batch_size, split='train')
-            captions, features, urls = minibatch
+            loss_tr = self.train_val_step(data, batch_size, optimizer, True)
+            loss_val = self.train_val_step(data, batch_size, optimizer, False)
+            scheduler.step(loss_val)
+            if use_visdom:
+                # to visualize the thing
+                vis.add_scalar(plot_name='Training loss', idtag='train', y=loss_tr.item(), x=i)
+                vis.add_scalar(plot_name='Validating loss', idtag='val', y=loss_val.item(), x=i)
 
-            captions = torch.LongTensor(captions).to(self.device)
-            features = torch.from_numpy(features).to(self.device)
+            if (i) % 10 == 0:
+                print('Epoch:  %d | Current Loss: %.4f' % (i, loss_tr.item()))
+                val_accuracy, train_accuracy = evaluate_model(self, data, data['idx_to_word'], batch_size=50) # evaluate the BLEU score from time to in a small batch time...
+                self.val_acc_history.append(val_accuracy)
+                if use_visdom:
+                    # to visualize the thing
+                    vis.add_scalar(plot_name='Bleu Score Validation', idtag='val_bleu', y=val_accuracy, x=i)
+                    vis.add_scalar(plot_name='Bleu Score Train', idtag='train_bleu', y=train_accuracy, x=i)
+                    test_im, test_cap = self.getAnnotatedImage(data, 'train')
+                    vis.add_image(plot_name=test_cap, idtag='train_img', image=test_im)
+                    val_im, val_cap = self.getAnnotatedImage(data, 'val')
+                    vis.add_image(plot_name=val_cap, idtag='val_img', image=val_im)
 
-            # Cut captions into two pieces: captions_in has everything but the last word
-            # and will be input to the RNN; captions_out has everything but the first
-            # word and this is what we will expect the RNN to generate. These are offset
-            # by one relative to each other because the RNN should produce word (t+1)
-            # after receiving word t. The first element of captions_in will be the START
-            # token, and the first element of captions_out will be the first word.
-
-            captions_in = captions[:, :-1]
-            captions_out = captions[:, 1:]
-
-            Y_hat = self.forward(features, captions_in)
-            loss = self.loss(Y_hat, captions_out)
-            self.loss_history.append(loss)  # save loss
-
-            loss.backward()
-            optimizer.step()  # Updates all the weights of the network
-            optimizer.zero_grad()  #
-            # At the end of every epoch, increment the epoch counter and decay the
-            # learning rate.
-            epoch_end = (i + 1) % iterations_per_epoch == 0
-            if epoch_end:
-                self.epoch += 1
-
-
-                if (self.epoch) % 1 == 0:
-                    print('Epoch:  %d | Current Loss: %.4f' % (self.epoch, self.loss_history[-1]))
-                    if self.epoch % 5 == 0:
-                        val_accuracy = evaluate_model(self, data, data['idx_to_word'], batch_size=40) # evaluate the BLEU score from time to in a small batch time...
-                        self.val_acc_history.append(val_accuracy)
-                        if val_accuracy > self.best_val_acc:
-                            self.best_val_acc = val_accuracy
-                            torch.save(self, 'models/best_validation.pytorch')
-
-        torch.save(self, 'models/current_model.pytorch') # maybe to save the model giving the best BLEU score?
+                early_stopping(loss_val.cpu().detach().numpy(), self)
+                if early_stopping.early_stop:
+                    print("Early stopping")
+                    break
+        torch.save(self, 'models/trained_model.pytorch') # maybe to save the model giving the best BLEU score?
         return self.loss_history
 
 
@@ -383,8 +396,29 @@ class Model_text_lstm(nn.Module):
        out = best_beams[0][3]
        out = out.view(out.shape[0], 1, -1)
 
-       return out, np.array(wordlist)
+       return out, np.array(wordlist.cpu())
 
+
+
+    def getAnnotatedImage(self, data, split):
+        ''' samples image and returns it with GT and generated capture'''
+        minibatch = sample_coco_minibatch(data, batch_size=1, split=split)
+        captions, features, urls = minibatch
+         # sample some captions given image features
+        gt_captions = decode_captions(captions,  data['idx_to_word'] )
+        #_, sample_captions = self.beam_decode(features)
+        captions_out = self.sample(features)
+        sample_captions = decode_captions(captions_out, data['idx_to_word'])
+        for gt_caption, sample_caption, url in zip(gt_captions, sample_captions, urls):
+             img = image_from_url(url)
+             img = np.asarray(img)
+             try:
+                img = np.swapaxes(img, 0, 2).transpose(0,2,1)
+             except ValueError:
+                 img = np.random.rand(3, 256, 256)
+             caption = ('%s:%s.\nGT:%s' % (split, sample_caption, gt_caption))
+
+        return img, caption
 
 
 
