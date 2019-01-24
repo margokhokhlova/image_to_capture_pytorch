@@ -12,6 +12,7 @@ from torchvision.utils import save_image
 from image_utils import image_from_url
 from Visdom_grapher import VisdomGrapher
 import matplotlib.pyplot as plt
+
 def maximums(T, N):
     """returns the N higher values in tensor T, with their positions,
         along dimension 2
@@ -395,7 +396,6 @@ class Model_text_lstm(nn.Module):
        wordlist = best_beams[0][2]
        out = best_beams[0][3]
        out = out.view(out.shape[0], 1, -1)
-
        return out, np.array(wordlist.cpu())
 
 
@@ -406,9 +406,10 @@ class Model_text_lstm(nn.Module):
         captions, features, urls = minibatch
          # sample some captions given image features
         gt_captions = decode_captions(captions,  data['idx_to_word'] )
-        #_, sample_captions = self.beam_decode(features)
-        captions_out = self.sample(features)
-        sample_captions = decode_captions(captions_out, data['idx_to_word'])
+        _,captions_out = self.beam_decode(features)
+        #captions_out = self.sample(features)
+        sample_captions = []
+        sample_captions.append(decode_captions(captions_out, data['idx_to_word']))
         for gt_caption, sample_caption, url in zip(gt_captions, sample_captions, urls):
              img = image_from_url(url)
              img = np.asarray(img)
@@ -416,7 +417,7 @@ class Model_text_lstm(nn.Module):
                 img = np.swapaxes(img, 0, 2).transpose(0,2,1)
              except ValueError:
                  img = np.random.rand(3, 256, 256)
-             caption = ('%s:%s.\nGT:%s' % (split, sample_caption, gt_caption))
+             caption = ('%s \n %s \n GT:%s' % (split, sample_caption, gt_caption))
 
         return img, caption
 
