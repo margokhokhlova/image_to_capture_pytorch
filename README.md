@@ -8,3 +8,4 @@ No attention is used, since I use encoded features provided by CS231n course (th
 Otherwise, the model architecture is exactly as the one made in the course, so can be re-used for learning purposes.
 The code here is stored only as a demo for myself, I hardly recommend to use it :)
 
+![Screenshot](screenshot.png)
